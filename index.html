@@ -102,7 +102,7 @@
         }
         
         .stat-value {
-            font-weight: bold;
+            font-weight: bold,
             font-size: 18px;
         }
         
@@ -258,7 +258,7 @@
             <div id="network"></div>
             <div class="info" id="nodeInfo"></div>
             <div class="footer">
-                Généré le 22/11/2025 à 20:48
+                Généré le 22/11/2025 à 21:03
             </div>
         </div>
     </div>
@@ -276,7 +276,55 @@
         const DEFAULT_EDGE_COLOR = '#CCCCCC';
         const HIGHLIGHT_EDGE_COLOR = '#555555'; // gris foncé pour les relations mises en avant
 
-        // Fonctions utilitaires pour la mise en évidence des relations
+        // --- Taille des bulles corrélée au taux de connaissance ---
+        function applyKnowledgeBasedSizes() {
+            const nodeIds = nodes.getIds();
+            const totalNodes = nodeIds.length;
+            if (totalNodes === 0) return;
+
+            // Calcul du nombre de connexions (degré) pour chaque nœud
+            const degreeMap = {};
+            nodeIds.forEach(function(id) {
+                degreeMap[id] = 0;
+            });
+
+            const allEdges = edges.get();
+            allEdges.forEach(function(edge) {
+                if (degreeMap.hasOwnProperty(edge.from)) {
+                    degreeMap[edge.from] += 1;
+                }
+                if (degreeMap.hasOwnProperty(edge.to)) {
+                    degreeMap[edge.to] += 1;
+                }
+            });
+
+            const degrees = Object.values(degreeMap);
+            const minDeg = Math.min.apply(null, degrees);
+            const maxDeg = Math.max.apply(null, degrees);
+
+            // Plage de tailles limitée pour éviter des écarts trop forts
+            const MIN_SIZE = 8;
+            const MAX_SIZE = 64;
+
+            const updates = nodeIds.map(function(id) {
+                const deg = degreeMap[id] || 0;
+                let norm = 0.5; // valeur par défaut
+
+                if (maxDeg > minDeg) {
+                    norm = (deg - minDeg) / (maxDeg - minDeg); // entre 0 et 1
+                }
+
+                const size = MIN_SIZE + norm * (MAX_SIZE - MIN_SIZE);
+                return {
+                    id: id,
+                    size: size
+                };
+            });
+
+            nodes.update(updates);
+        }
+
+        // Remet toutes les arêtes à la couleur par défaut
         function resetEdgeColors() {
             const allEdges = edges.get();
             const updates = allEdges.map(function(edge) {
@@ -288,13 +336,12 @@
             edges.update(updates);
         }
 
+        // Met en évidence toutes les arêtes liées au nœud donné
         function highlightEdgesForNode(nodeId) {
-            // On remet d'abord tout à la couleur par défaut
             resetEdgeColors();
             if (nodeId == null) {
                 return;
             }
-            // Puis on met en gris foncé uniquement les liens connectés au nœud sélectionné
             const connected = edges.get({
                 filter: function(edge) {
                     return edge.from === nodeId || edge.to === nodeId;
@@ -312,7 +359,7 @@
         let options = {
             nodes: {
                 shape: 'dot',
-                size: 20,
+                size: 20, // sera écrasé par applyKnowledgeBasedSizes()
                 font: {
                     size: 14,
                     color: '#333',
@@ -367,6 +414,9 @@
             }
         };
 
+        // Appliquer les tailles basées sur le taux de connaissance
+        applyKnowledgeBasedSizes();
+
         // Créer le réseau
         const network = new vis.Network(container, data, options);
 
@@ -377,25 +427,35 @@
                 const nodeId = params.nodes[0];
                 const node = nodes.get(nodeId);
                 
-                // Compter les connexions
+                // Connexions de cette personne
                 const connections = edges.get({
                     filter: function(edge) {
                         return edge.from === nodeId || edge.to === nodeId;
                     }
                 });
 
-                // Met en évidence les relations de cette personne
+                // Mise en évidence des relations
                 highlightEdgesForNode(nodeId);
-                
+
+                // Calcul du taux de connaissance : personnes connues / total des autres personnes
+                const totalNodes = nodes.getIds().length;
+                const maxRelations = totalNodes > 0 ? (totalNodes - 1) : 0;
+                let taux = 0;
+                if (maxRelations > 0) {
+                    taux = (connections.length / maxRelations) * 100;
+                }
+                const tauxStr = taux.toFixed(1).replace('.', ',');
+
                 infoDiv.innerHTML = `
                     <h3>${node.label}</h3>
                     <p><strong>Groupe:</strong> ${node.group}</p>
-                    <p><strong>Connexions:</strong> ${connections.length}</p>
+                    <p><strong>Taux de connaissance:</strong> ${tauxStr}%</p>
+                    <p><strong>Connexions:</strong> ${connections.length} / ${maxRelations}</p>
                 `;
                 infoDiv.classList.add('active');
             } else {
+                // clic dans le vide : on cache la popup et on remet les couleurs d'origine
                 infoDiv.classList.remove('active');
-                // Si on clique dans le vide, on remet toutes les arêtes comme avant
                 resetEdgeColors();
             }
         });
